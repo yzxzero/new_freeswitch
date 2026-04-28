@@ -1,0 +1,25 @@
+prefix=/home/xyz/freeswitch
+exec_prefix=/home/xyz/freeswitch
+libdir=/usr/src/freeswitch-1.10.6
+libexecdir=${exec_prefix}/libexec
+includedir=/usr/src/freeswitch-1.10.6/src/include
+modulesdir=/home/xyz/freeswitch/lib/freeswitch/mod
+runtimedir=/var/run/freeswitch
+logfiledir=/var/log/freeswitch
+sysconfdir=/etc/freeswitch
+confdir=/etc/freeswitch/freeswitch
+dbdir=/var/lib/freeswitch/db
+htdocsdir=/home/xyz/freeswitch/share/freeswitch/htdocs
+localstatedir=/var/lib/freeswitch
+grammardir=/home/xyz/freeswitch/share/freeswitch/grammar
+soundsdir=/home/xyz/freeswitch/share/freeswitch/sounds
+scriptdir=/home/xyz/freeswitch/share/freeswitch/scripts
+recordingsdir=/var/lib/freeswitch/recordings
+bindir=${exec_prefix}/bin
+
+Name: freeswitch
+Version: 1.10.6-release
+Description: FreeSWITCH open source telephony platform
+Libs: -L${libdir} -lfreeswitch
+Cflags: -I${includedir} -I/usr/src/freeswitch-1.10.6/src/include -I/usr/src/freeswitch-1.10.6/libs/libteletone/src
+

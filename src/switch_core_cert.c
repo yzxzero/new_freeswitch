@@ -281,7 +281,7 @@ SWITCH_DECLARE(int) switch_core_gen_certs(const char *prefix)
 		}
 	}
 
-	CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
+	// CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON); // OpenSSL 3.0 removed
 
 	//bio_err=BIO_new_fp(stderr, BIO_NOCLOSE);
 

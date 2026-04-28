@@ -1,0 +1,28 @@
+<configuration name="asr.conf" description="Multi-cloud ASR Module">
+  <settings>
+    <param name="default-provider" value="aliyun"/>
+    <param name="default-mode" value="websocket"/>
+    <param name="max-sessions" value="100"/>
+  </settings>
+  <providers>
+    <provider name="aliyun">
+      <param name="access-key-id" value="$${ALIYUN_AK_ID}"/>
+      <param name="access-key-secret" value="$${ALIYUN_AK_SECRET}"/>
+      <param name="app-key" value="$${ALIYUN_ASR_APP_KEY}"/>
+      <param name="region" value="cn-shanghai"/>
+      <param name="format" value="pcm"/>
+      <param name="sample-rate" value="16000"/>
+      <param name="enable-intermediate-result" value="true"/>
+      <param name="enable-punctuation" value="true"/>
+      <param name="rest-timeout" value="10000"/>
+    </provider>
+    <!-- Future providers
+    <provider name="tencent">
+      <param name="secret-id" value="$${TENCENT_SECRET_ID}"/>
+      <param name="secret-key" value="$${TENCENT_SECRET_KEY}"/>
+      <param name="engine-model-type" value="16k_zh"/>
+      <param name="region" value="ap-guangzhou"/>
+    </provider>
+    -->
+  </providers>
+</configuration>

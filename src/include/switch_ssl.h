@@ -28,8 +28,12 @@
  *
  */
 
+#define OPENSSL_SUPPRESS_DEPRECATED
 #ifndef __SWITCH_SSL_H
 #define __SWITCH_SSL_H
+
+/* OpenSSL 3.0 compatibility: suppress deprecated API warnings */
+#define OPENSSL_SUPPRESS_DEPRECATED
 
 #if defined(HAVE_OPENSSL)
 #if defined (MACOSX) || defined(DARWIN)
