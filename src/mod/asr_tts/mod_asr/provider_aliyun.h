@@ -25,6 +25,7 @@ typedef struct {
 	int rest_timeout;
 	switch_bool_t ws_connected;
 	switch_bool_t recognition_started;
+	switch_bool_t transcription_started;
 	char *task_id;
 	/* Audio accumulation for REST mode */
 	switch_buffer_t *rest_audio_buffer;

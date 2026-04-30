@@ -86,6 +86,8 @@ struct asr_session {
 	char *language;
 	/* Provider-specific params set via text_param */
 	char *provider_name;
+	/* Native sample rate from FreeSWITCH (e.g. 8000 for phone calls) */
+	int native_rate;
 	/* WebSocket connection handle (separate from provider_private) */
 	void *ws_handle;
 	/* Idle counter for REST mode auto-submit */

@@ -33,6 +33,9 @@ static switch_status_t mod_asr_asr_open(switch_asr_handle_t *ah, const char *cod
 	char *p;
 	switch_status_t status;
 
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+		"mod_asr_asr_open: codec=%s, rate=%d, dest=%s\n", codec, rate, dest ? dest : "(null)");
+
 	if (!zstr(dest)) {
 		dup_dest = strdup(dest);
 		if ((p = strchr(dup_dest, ':'))) {
@@ -58,6 +61,10 @@ static switch_status_t mod_asr_asr_open(switch_asr_handle_t *ah, const char *cod
 		return SWITCH_STATUS_FALSE;
 	}
 
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+		"mod_asr_asr_open: provider=%s, mode=%s, rate=%d\n",
+		provider_name, mode == ASR_MODE_WEBSOCKET ? "websocket" : "rest", rate);
+
 	session = asr_session_create(ah->memory_pool, provider_name, mode);
 	switch_safe_free(dup_dest);
 
@@ -69,8 +76,22 @@ static switch_status_t mod_asr_asr_open(switch_asr_handle_t *ah, const char *cod
 	ah->private_info = session;
 	ah->codec = switch_core_strdup(ah->memory_pool, "L16");
 	ah->rate = rate;
+	session->native_rate = rate;
 
 	session->grammar = switch_core_strdup(ah->memory_pool, "default");
+
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+		"mod_asr_asr_open: session created, native_rate=%d, calling provider->open()\n", session->native_rate);
+
+	/* Call provider->open() in the main thread so network errors are caught properly */
+	if (session->provider && session->provider->open) {
+		status = session->provider->open(session, ah);
+		if (status != SWITCH_STATUS_SUCCESS) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Provider open failed for %s\n", provider_name);
+			return SWITCH_STATUS_FALSE;
+		}
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Provider open succeeded, starting worker\n");
+	}
 
 	status = asr_session_start_worker(session);
 	if (status != SWITCH_STATUS_SUCCESS) {
@@ -87,7 +108,7 @@ static switch_status_t mod_asr_asr_load_grammar(switch_asr_handle_t *ah, const c
 
 	if (!session) return SWITCH_STATUS_FALSE;
 
-	switch_safe_free(session->grammar);
+	/* grammar is pool-allocated, do NOT free it with switch_safe_free */
 	session->grammar = switch_core_strdup(ah->memory_pool, grammar ? grammar : "default");
 
 	return SWITCH_STATUS_SUCCESS;

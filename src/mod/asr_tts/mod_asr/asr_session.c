@@ -13,23 +13,19 @@
 static void *SWITCH_THREAD_FUNC asr_session_worker_thread(switch_thread_t *thread, void *obj)
 {
 	asr_session_t *session = (asr_session_t *) obj;
-	switch_status_t status;
 	switch_size_t avail;
 	uint8_t *data;
 	switch_size_t read_len;
+	uint32_t feed_count = 0;
+	uint32_t total_bytes_fed = 0;
+	uint32_t last_report_bytes = 0;
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "ASR session worker started: %s\n", session->id);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "ASR session worker started: %s (provider=%s, mode=%s, native_rate=%d)\n",
+		session->id, session->provider ? session->provider->name : "none",
+		session->mode == ASR_MODE_WEBSOCKET ? "ws" : "rest", session->native_rate);
 
-	if (session->provider && session->provider->open) {
-		status = session->provider->open(session, NULL);
-		if (status != SWITCH_STATUS_SUCCESS) {
-			switch_mutex_lock(session->mutex);
-			session->state = ASR_SESSION_STATE_ERROR;
-			switch_mutex_unlock(session->mutex);
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "ASR provider open failed for session %s\n", session->id);
-			goto done;
-		}
-	}
+	/* Note: provider->open() is now called from mod_asr_asr_open() before
+	   the worker thread starts, so we just set state to LISTENING here */
 
 	switch_mutex_lock(session->mutex);
 	session->state = ASR_SESSION_STATE_LISTENING;
@@ -62,6 +58,15 @@ static void *SWITCH_THREAD_FUNC asr_session_worker_thread(switch_thread_t *threa
 
 			if (read_len > 0 && session->provider && session->provider->feed) {
 				session->provider->feed(session, data, (unsigned int) read_len);
+				feed_count++;
+				total_bytes_fed += (uint32_t) read_len;
+				/* Log every ~50 feeds or ~160KB of audio */
+				if (total_bytes_fed - last_report_bytes >= 160000) {
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+						"ASR worker: session %s, feed #%u, total_bytes=%u, last_chunk=%zu\n",
+						session->id, feed_count, total_bytes_fed, read_len);
+					last_report_bytes = total_bytes_fed;
+				}
 			}
 
 			free(data);
@@ -76,17 +81,16 @@ static void *SWITCH_THREAD_FUNC asr_session_worker_thread(switch_thread_t *threa
 		}
 	}
 
-done:
-	if (session->provider && session->provider->close) {
-		session->provider->close(session);
-	}
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+		"ASR worker ending: session %s, feeds=%u, total_bytes=%u\n",
+		session->id, feed_count, total_bytes_fed);
 
 	switch_mutex_lock(session->mutex);
 	session->state = ASR_SESSION_STATE_CLOSED;
 	switch_set_flag(session, ASR_SESSION_FLAG_CLOSED);
 	switch_mutex_unlock(session->mutex);
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "ASR session worker ended: %s\n", session->id);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "ASR session worker ended: %s\n", session->id);
 
 	return NULL;
 }
@@ -180,13 +184,15 @@ switch_status_t asr_session_start_worker(asr_session_t *session)
 
 	switch_threadattr_create(&thd_attr, session->pool);
 	switch_threadattr_stacksize_set(thd_attr, SWITCH_THREAD_STACKSIZE);
-	switch_threadattr_detach_set(thd_attr, 1);
+	switch_threadattr_detach_set(thd_attr, 0);
 
 	return switch_thread_create(&session->worker_thread, thd_attr, asr_session_worker_thread, session, session->pool);
 }
 
 void asr_session_stop_worker(asr_session_t *session)
 {
+	switch_status_t retval;
+
 	if (!session) {
 		return;
 	}
@@ -195,10 +201,18 @@ void asr_session_stop_worker(asr_session_t *session)
 	session->running = SWITCH_FALSE;
 	switch_thread_cond_signal(session->cond);
 	switch_mutex_unlock(session->mutex);
+
+	/* Wait for worker thread to actually exit before destroying resources */
+	if (session->worker_thread) {
+		switch_thread_join(&retval, session->worker_thread);
+		session->worker_thread = NULL;
+	}
 }
 
 switch_status_t asr_session_feed(asr_session_t *session, void *data, unsigned int len)
 {
+	static uint32_t global_feed_count = 0;
+
 	if (!session || !data || len == 0) {
 		return SWITCH_STATUS_FALSE;
 	}
@@ -207,10 +221,19 @@ switch_status_t asr_session_feed(asr_session_t *session, void *data, unsigned in
 		return SWITCH_STATUS_BREAK;
 	}
 
+	global_feed_count++;
+
 	switch_mutex_lock(session->mutex);
 	switch_buffer_write(session->audio_buffer, data, len);
 	switch_thread_cond_signal(session->cond);
 	switch_mutex_unlock(session->mutex);
+
+	/* Log first 5 feeds, then every 500th */
+	if (global_feed_count <= 5 || global_feed_count % 500 == 0) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
+			"asr_session_feed: session=%s, len=%u, feed_count=%u\n",
+			session->id, len, global_feed_count);
+	}
 
 	return SWITCH_STATUS_SUCCESS;
 }
