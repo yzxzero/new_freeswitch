@@ -172,7 +172,8 @@ static switch_status_t mod_asr_asr_check_results(switch_asr_handle_t *ah, switch
 	if (switch_test_flag(session, ASR_SESSION_FLAG_NOINPUT) ||
 		switch_test_flag(session, ASR_SESSION_FLAG_NOMATCH) ||
 		switch_test_flag(session, ASR_SESSION_FLAG_HAS_TEXT) ||
-		switch_test_flag(session, ASR_SESSION_FLAG_BARGE)) {
+		switch_test_flag(session, ASR_SESSION_FLAG_BARGE) ||
+		switch_test_flag(session, ASR_SESSION_FLAG_START_OF_SPEECH)) {
 		return SWITCH_STATUS_SUCCESS;
 	}
 
@@ -197,6 +198,13 @@ static switch_status_t mod_asr_asr_get_results(switch_asr_handle_t *ah, char **x
 		return SWITCH_STATUS_BREAK;
 	}
 
+	/* START_OF_SPEECH: return BREAK to fire "begin-speaking" event */
+	if (switch_test_flag(session, ASR_SESSION_FLAG_START_OF_SPEECH) &&
+		!switch_test_flag(session, ASR_SESSION_FLAG_HAS_TEXT)) {
+		switch_clear_flag(session, ASR_SESSION_FLAG_START_OF_SPEECH);
+		return SWITCH_STATUS_BREAK;
+	}
+
 	if (session->provider && session->provider->get_results) {
 		pstatus = session->provider->get_results(session, xmlstr);
 		if (pstatus == SWITCH_STATUS_SUCCESS) {
@@ -207,6 +215,14 @@ static switch_status_t mod_asr_asr_get_results(switch_asr_handle_t *ah, char **x
 	if (session->result_xml) {
 		*xmlstr = strdup(session->result_xml);
 		switch_clear_flag(session, ASR_SESSION_FLAG_HAS_TEXT);
+		/* Reset for continuous recognition */
+		switch_safe_free(session->result_text);
+		switch_safe_free(session->result_xml);
+		session->result_text = NULL;
+		session->result_xml = NULL;
+		session->result_confidence = 0;
+		session->state = ASR_SESSION_STATE_LISTENING;
+		switch_clear_flag(session, ASR_SESSION_FLAG_START_OF_SPEECH);
 		return SWITCH_STATUS_SUCCESS;
 	}
 

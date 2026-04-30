@@ -278,6 +278,15 @@ switch_status_t asr_session_get_result(asr_session_t *session, char **xmlstr)
 	if (session->result_xml) {
 		*xmlstr = strdup(session->result_xml);
 		switch_clear_flag(session, ASR_SESSION_FLAG_HAS_TEXT);
+		/* Reset for continuous recognition: clear result and return to LISTENING
+		   so the next SentenceEnd can trigger a new result cycle */
+		switch_safe_free(session->result_text);
+		switch_safe_free(session->result_xml);
+		session->result_text = NULL;
+		session->result_xml = NULL;
+		session->result_confidence = 0;
+		session->state = ASR_SESSION_STATE_LISTENING;
+		switch_clear_flag(session, ASR_SESSION_FLAG_START_OF_SPEECH);
 		switch_mutex_unlock(session->mutex);
 		return SWITCH_STATUS_SUCCESS;
 	}
