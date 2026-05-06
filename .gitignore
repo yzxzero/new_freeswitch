@@ -279,3 +279,10 @@ src/mod/*/*/test/[0-9]*/*
 test-suite.log
 src/mod/applications/mod_av/test/test_BT7.mp4
 src/mod/applications/mod_av/test/test_RGB.mp4
+
+# mod_asr generated docs
+src/mod/asr_tts/mod_asr/CHANGES.md
+src/mod/asr_tts/mod_asr/COMPARISON.md
+
+# demo files
+demo.html
