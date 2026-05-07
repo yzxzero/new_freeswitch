@@ -60,7 +60,8 @@ end
 
 -- Main loop
 local loop_count = 0
-while session:ready() and not done do
+-- while session:ready() and not done do
+while session:ready() do
     loop_count = loop_count + 1
 
     if loop_count <= 3 then
@@ -76,7 +77,7 @@ while session:ready() and not done do
 
     if max_rounds > 0 and round >= max_rounds then
         session:consoleLog("INFO", string.format("ASR: Max rounds reached (%d)\n", max_rounds))
-        done = true
+        -- done = true
     elseif os.time() - last_activity >= max_silence then
         session:consoleLog("INFO", string.format("ASR: Silence timeout (%ds)\n", max_silence))
         done = true

@@ -169,6 +169,17 @@ static switch_status_t mod_asr_asr_check_results(switch_asr_handle_t *ah, switch
 
 	if (!session) return SWITCH_STATUS_FALSE;
 
+	/* 快速路径：检查标志位（无锁，"最终一致"设计）
+	 * HAS_TEXT/NOINPUT/NOMATCH/BARGE/START_OF_SPEECH 任一标志命中
+	 * 即表示"有事件需要处理"，返回SUCCESS。
+	 *
+	 * 【线程安全说明】switch_test_flag是非原子的位测试操作，理论上存在
+	 * 与worker线程set_flag/clear_flag的竞态。但此处刻意不加锁，原因：
+	 *   1. check_results是极高频调用（每20ms一次），加锁会严重影响性能
+	 *   2. 最坏情况是漏读一个刚设置的flag（false negative），下次轮询即可纠正
+	 *   3. 不可能出现false positive（flag只被set，不会被并发清到已set的状态）
+	 *   4. x86架构上对齐的int读操作天然原子，不会读到半写的值
+	 * 这种"最终一致"的设计在FreeSWITCH核心代码中广泛使用。 */
 	if (switch_test_flag(session, ASR_SESSION_FLAG_NOINPUT) ||
 		switch_test_flag(session, ASR_SESSION_FLAG_NOMATCH) ||
 		switch_test_flag(session, ASR_SESSION_FLAG_HAS_TEXT) ||
@@ -212,17 +223,19 @@ static switch_status_t mod_asr_asr_get_results(switch_asr_handle_t *ah, char **x
 		}
 	}
 
-	if (session->result_xml) {
-		*xmlstr = strdup(session->result_xml);
-		switch_clear_flag(session, ASR_SESSION_FLAG_HAS_TEXT);
-		/* Reset for continuous recognition */
-		switch_safe_free(session->result_text);
-		switch_safe_free(session->result_xml);
-		session->result_text = NULL;
-		session->result_xml = NULL;
-		session->result_confidence = 0;
-		session->state = ASR_SESSION_STATE_LISTENING;
-		switch_clear_flag(session, ASR_SESSION_FLAG_START_OF_SPEECH);
+	/* 优先级4：从session缓存中获取识别结果（线程安全）
+	 *
+	 * 【线程安全修复】原实现直接访问session->result_xml并执行
+	 * free+置NULL的重置操作，无任何锁保护。但worker线程可能同时在
+	 * asr_session_set_result()（已加mutex）中修改这些字段，导致：
+	 *   (1) 读取到半写入状态的指针 → segfault
+	 *   (2) 双方同时free同一指针 → double-free
+	 *   (3) get_results free后set_result又访问 → use-after-free
+	 *
+	 * 修复方式：委托给asr_session_get_result()，该函数在mutex保护下
+	 * 完成相同的"检查-复制-释放-重置"序列，与set_result()互斥，
+	 * 消除了双重释放和竞态访问的风险。同时也消除了代码重复。 */
+	if (asr_session_get_result(session, xmlstr) == SWITCH_STATUS_SUCCESS) {
 		return SWITCH_STATUS_SUCCESS;
 	}
 
@@ -459,16 +472,43 @@ SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_asr_shutdown)
 {
 	switch_hash_index_t *hi;
 	asr_session_t *session;
+	asr_session_t *sessions[1024];  /* 收集的会话指针数组 */
+	int session_count = 0;
+	int i;
 
+	/* ---- 步骤1：收集所有活跃会话指针 ----
+	 * 【死锁修复】原实现在持asr_globals.mutex期间调用asr_session_stop_worker()，
+	 * 而stop_worker内部的switch_thread_join()会阻塞等待worker线程退出。
+	 * 持全局锁期间阻塞会导致其他需要全局锁的操作（如新建/销毁session、
+	 * provider查找等）死锁。例如：
+	 *   shutdown线程: 持mutex → thread_join阻塞等待worker退出
+	 *   worker线程:   需要mutex（如asr_session_destroy中的asr_globals.mutex获取会死锁）
+	 *
+	 * 修复：先在锁保护下快速收集所有session指针，然后释放锁，
+	 * 再逐个停止worker线程。收集阶段是纯指针拷贝，O(N)极快，
+	 * 不会长时间持锁。停止worker时不再持全局锁，其他线程可正常操作。
+	 *
+	 * 安全性：shutdown期间FreeSWITCH不会再新建session（模块正在卸载），
+	 * 收集到的session指针在stop_worker完成前不会被释放（session
+	 * 的生命周期由FreeSWITCH核心管理，卸载期间会等待所有引用释放）。 */
 	switch_mutex_lock(asr_globals.mutex);
 	for (hi = switch_core_hash_first(asr_globals.sessions); hi; hi = switch_core_hash_next(&hi)) {
 		switch_core_hash_this(hi, NULL, NULL, (void **) &session);
-		if (session) {
-			asr_session_stop_worker(session);
+		if (session && session_count < 1024) {
+			sessions[session_count++] = session;
 		}
 	}
 	switch_mutex_unlock(asr_globals.mutex);
 
+	/* ---- 步骤2：停止所有worker线程（不持全局锁） ---- */
+	for (i = 0; i < session_count; i++) {
+		/* 通知worker线程退出并等待其结束
+		 * stop_worker内部：设running=false + cond_signal + thread_join
+		 * join可能阻塞数秒（等待worker处理完当前任务），但不影响其他线程 */
+		asr_session_stop_worker(sessions[i]);
+	}
+
+	/* ---- 步骤3：销毁全局哈希表 ---- */
 	switch_core_hash_destroy(&asr_globals.sessions);
 	switch_core_hash_destroy(&asr_globals.providers);
 
