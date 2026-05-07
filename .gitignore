@@ -283,6 +283,8 @@ src/mod/applications/mod_av/test/test_RGB.mp4
 # mod_asr generated docs
 src/mod/asr_tts/mod_asr/CHANGES.md
 src/mod/asr_tts/mod_asr/COMPARISON.md
+src/mod/asr_tts/mod_asr/MOD_ASR_FLOW.md
+src/mod/asr_tts/mod_asr/MOD_ASR_STRESS_TEST.md
 
 # demo files
 demo.html
